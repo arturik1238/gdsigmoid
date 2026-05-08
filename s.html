@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GD Sigmoid Online - Final Version</title>
+    <!-- Подключаем Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; color: white; user-select: none; }
+        canvas { display: block; }
+        
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; align-items: center; justify-content: center; }
+        .window { background: rgba(10, 10, 10, 0.98); padding: 30px; border-radius: 20px; border: 2px solid #555; pointer-events: auto; text-align: center; min-width: 400px; box-shadow: 0 0 50px #000; }
+        .hidden { display: none !important; }
+        
+        button { padding: 12px 20px; margin: 5px; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; text-transform: uppercase; transition: 0.1s; }
+        button:hover { transform: scale(1.05); filter: brightness(1.2); }
+        .btn-green { background: #4CAF50; color: white; }
+        .btn-blue { background: #2196F3; color: white; }
+        .btn-red { background: #f44336; color: white; }
+        .btn-gold { background: #ffc107; color: #000; }
+
+        #game-hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: none; }
+        #progress-container { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); width: 400px; height: 14px; background: rgba(255,255,255,0.1); border-radius: 7px; border: 2px solid #555; overflow: hidden; }
+        #progress-bar { width: 0%; height: 100%; background: #00ffea; }
+        #percent-text { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: bold; color: #00ffea; }
+
+        .level-item { background: #1a1a1a; margin: 10px 0; padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #444; }
+        #editor-tools { position: absolute; top: 10px; left: 10px; pointer-events: auto; background: rgba(0,0,0,0.9); padding: 15px; border-radius: 15px; z-index: 100; border: 1px solid #444; width: 180px; }
+        #editor-tools button { width: 100%; margin: 3px 0; font-size: 11px; }
+    </style>
+</head>
+<body>
+
+<div id="game-hud">
+    <div id="progress-container"><div id="progress-bar"></div></div>
+    <div id="percent-text">0%</div>
+    <button class="btn-red" style="position: absolute; top: 10px; right: 10px; pointer-events: auto;" onclick="quitToMenu()">ВЫЙТИ</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div class="overlay" id="ui-overlay">
+    <div id="login-screen" class="window">
+        <h1 style="color:#00ffea;">GEOMETRY DASH ONLINE</h1>
+        <input type="text" id="nick-input" placeholder="НИКНЕЙМ" style="padding: 15px; width: 80%; background: #222; border: 1px solid #444; color: white; border-radius: 10px;"><br><br>
+        <button class="btn-green" style="width: 85%;" onclick="login()">ВОЙТИ</button>
+    </div>
+
+    <div id="main-menu" class="window hidden">
+        <h2 id="hello-user">МЕНЮ</h2>
+        <button class="btn-gold" style="width: 100%" onclick="openLevels(true)">🏆 ОФИЦИАЛЬНЫЕ</button><br>
+        <button class="btn-blue" style="width: 100%" onclick="openLevels(false)">🌍 СООБЩЕСТВО</button><br>
+        <button class="btn-green" style="width: 100%" onclick="startEditor()">🛠 РЕДАКТОР</button><br>
+        <button class="btn-blue" style="width: 100%" onclick="openIconSelector()">👕 ИКОНКА</button><br>
+        <button class="btn-gold hidden" id="admin-draw-btn" style="width: 100%" onclick="openIconEditor()">🎨 РИСОВАТЬ (ADM)</button><br>
+        <button class="btn-red" style="width: 100%" onclick="location.reload()">ВЫХОД</button>
+    </div>
+
+    <div id="level-list" class="window hidden">
+        <h2 id="list-title">УРОВНИ</h2>
+        <div id="levels-container" style="max-height: 400px; overflow-y: auto;"></div>
+        <button class="btn-blue" onclick="backToMenu()">НАЗАД</button>
+    </div>
+
+    <div id="rate-window" class="window hidden">
+        <h3>ОЦЕНИТЬ</h3>
+        <select id="rate-diff" style="width: 100%; padding: 10px;">
+            <option value="Easy">🙂 Easy</option>
+            <option value="Normal">😐 Normal</option>
+            <option value="Hard">😬 Hard</option>
+            <option value="Demon">👹 Demon</option>
+        </select><br><br>
+        <label><input type="checkbox" id="rate-official"> Официальный уровень</label><br><br>
+        <button class="btn-green" onclick="confirmRate()">ПРИМЕНИТЬ</button>
+        <button onclick="document.getElementById('rate-window').classList.add('hidden')">ОТМЕНА</button>
+    </div>
+
+    <div id="win-screen" class="window hidden">
+        <h1 style="color:#ffc107;">ПРОЙДЕНО!</h1>
+        <button class="btn-green" onclick="quitToMenu()">В МЕНЮ</button>
+    </div>
+</div>
+
+<div id="editor-tools" class="hidden">
+    <div id="brush-info" style="color:#00ffea; font-weight: bold; margin-bottom: 5px;">БЛОК (0°)</div>
+    <button onclick="setBrush('block')">БЛОК</button>
+    <button onclick="setBrush('spike')">ШИП</button>
+    <button onclick="setBrush('portal_ship')">ЖЕЛТЫЙ ПОРТАЛ</button>
+    <button onclick="setBrush('portal_cube')">ЗЕЛЕНЫЙ ПОРТАЛ</button>
+    <button onclick="setBrush('orb')">ОРБ</button>
+    <button class="btn-gold" onclick="rotateBrush()">🔄 ПОВОРОТ</button>
+    <hr>
+    <button class="btn-green" onclick="saveLevelToDB()">ОПУБЛИКОВАТЬ</button>
+    <button class="btn-red" onclick="backToMenu()">ВЫЙТИ</button>
+</div>
+
+<script>
+    // --- ВСТАВЬ СВОИ ДАННЫЕ СЮДА ---
+    const SUPABASE_URL = 'https://kpvjcygqgdpjvfclxagr.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_cOZs3BJnE8F82UXx_p7ADA_nSnsvINI';
+    // -------------------------------
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let user = ""; let isAdmin = false; let gameState = 'login';
+    let levels = []; let progress = {}; 
+    let customIcons = JSON.parse(localStorage.getItem('gd_v10_icons')) || [[1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1]];
+    let selectedIcon = 0;
+
+    let player = { x: 0, y: 0, vy: 0, mode: 'cube', orbReady: true, grounded: false };
+    let editorObjects = []; let camX = 0, camY = 0; let keys = {};
+    let brush = 'block'; let brushRot = 0; let currentLvlIdx = -1;
+
+    const emojis = { 'Easy': '🙂', 'Normal': '😐', 'Hard': '😬', 'Demon': '👹', 'Unrated': '🔘' };
+
+    window.onkeydown = (e) => { keys[e.code] = true; if(e.code === 'Escape') quitToMenu(); };
+    window.onkeyup = (e) => keys[e.code] = false;
+
+    function login() {
+        user = document.getElementById('nick-input').value.trim();
+        if(!user) return;
+        isAdmin = (user === "Sigmoid121212");
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('main-menu').classList.remove('hidden');
+        document.getElementById('hello-user').innerText = "Привет, " + user;
+        if(isAdmin) document.getElementById('admin-draw-btn').classList.remove('hidden');
+    }
+
+    async function openLevels(official) {
+        hideAllWindows();
+        document.getElementById('level-list').classList.remove('hidden');
+        document.getElementById('list-title').innerText = official ? "🏆 ОФИЦИАЛЬНЫЕ" : "🌍 СООБЩЕСТВО";
+        
+        const { data, error } = await supabaseClient.from('levels').select('*').eq('official', official);
+        if(error) return alert("Ошибка загрузки: " + error.message);
+        
+        levels = data;
+        const container = document.getElementById('levels-container');
+        container.innerHTML = "";
+        levels.forEach((lvl, i) => {
+            const div = document.createElement('div');
+            div.className = "level-item";
+            const authorInfo = lvl.official ? "" : `<small>Автор: ${lvl.creator}</small>`;
+            div.innerHTML = `
+                <div style="text-align:left">
+                    <b>${lvl.name}</b> ${emojis[lvl.difficulty] || '🔘'}<br>
+                    ${authorInfo}
+                </div>
+                <div>
+                    <button class="btn-green" onclick="playLevel(${i})">PLAY</button>
+                    ${isAdmin ? `<button class="btn-gold" onclick="rateLevel(${i})">★</button>` : ''}
+                    ${(isAdmin || lvl.creator === user) ? `<button class="btn-red" onclick="deleteLevelFromDB('${lvl.id}')">X</button>` : ''}
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    async function saveLevelToDB() {
+        const name = prompt("Название уровня:");
+        if(!name) return;
+        const { error } = await supabaseClient.from('levels').insert([{
+            name: name, creator: user, difficulty: 'Unrated', official: false, data: editorObjects
+        }]);
+        if(error) alert("Ошибка сохранения: " + error.message);
+        else { alert("Уровень опубликован в сообществе!"); backToMenu(); }
+    }
+
+    async function deleteLevelFromDB(id) {
+        if(!confirm("Удалить этот уровень из облака?")) return;
+        const { error } = await supabaseClient.from('levels').delete().eq('id', id);
+        if(error) alert("Ошибка: " + error.message);
+        else openLevels(false);
+    }
+
+    async function confirmRate() {
+        const lvl = levels[currentLvlIdx];
+        const newDiff = document.getElementById('rate-diff').value;
+        const newOfficial = document.getElementById('rate-official').checked;
+        const { error } = await supabaseClient.from('levels').update({
+            difficulty: newDiff, official: newOfficial
+        }).eq('id', lvl.id);
+        
+        if(error) alert("Ошибка обновления: " + error.message);
+        else { document.getElementById('rate-window').classList.add('hidden'); openLevels(newOfficial); }
+    }
+
+    function playLevel(i) {
+        currentLvlIdx = i; gameState = 'play';
+        hideAllWindows(); document.getElementById('game-hud').style.display = 'block';
+        resetPlayer();
+    }
+
+    function resetPlayer() {
+        player.x = 100; player.y = canvas.height - 140;
+        player.vy = 0; player.mode = 'cube'; camX = 0; camY = 0;
+    }
+
+    function update() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const groundY = canvas.height - 100;
+
+        if(gameState === 'editor') {
+            if(keys['KeyW']) camY -= 8; if(keys['KeyS']) camY += 8;
+            if(keys['KeyA']) camX -= 8; if(keys['KeyD']) camX += 8;
+            drawGrid(camX, camY);
+            drawObjects(editorObjects, camX, camY);
+        }
+
+        if(gameState === 'play') {
+            const lvl = levels[currentLvlIdx];
+            const finishLine = (lvl.data.length > 0 ? Math.max(...lvl.data.map(o => o.x)) : 2000) + 600;
+            player.x += 7; camX = player.x - 250;
+            
+            let percent = Math.min(100, Math.floor((player.x / finishLine) * 100));
+            document.getElementById('progress-bar').style.width = percent + "%";
+            document.getElementById('percent-text').innerText = percent + "%";
+
+            if(player.mode === 'cube') {
+                player.vy += 0.9;
+                if(keys['Space'] && player.grounded) player.vy = -16;
+            } else {
+                player.vy += keys['Space'] ? -0.8 : 0.8;
+                if(player.vy > 7) player.vy = 7; if(player.vy < -7) player.vy = -7;
+            }
+            player.y += player.vy;
+            player.grounded = false;
+
+            if(player.y > groundY - 40) { player.y = groundY - 40; player.vy = 0; player.grounded = true; }
+            if(player.y < 0) { player.y = 0; player.vy = 0; }
+
+            drawObjects(lvl.data, camX, camY);
+            drawPlayer(player.x - camX, player.y - camY, player.mode);
+
+            lvl.data.forEach(obj => {
+                const ox = obj.x, oy = obj.y;
+                if (player.x + 35 > ox && player.x + 5 < ox + 40 && player.y + 35 > oy && player.y + 5 < oy + 40) {
+                    if (obj.type === 'spike') resetPlayer();
+                    else if (obj.type === 'orb' && keys['Space'] && player.orbReady) { player.vy = -16; player.orbReady = false; }
+                    else if (obj.type === 'portal_ship') player.mode = 'ship';
+                    else if (obj.type === 'portal_cube') player.mode = 'cube';
+                    else if (obj.type === 'block') {
+                        if (player.vy >= 0 && player.y + 30 < oy + 10) {
+                            player.y = oy - 40; player.vy = 0; player.grounded = true;
+                        } else resetPlayer();
+                    }
+                }
+            });
+
+            if(!keys['Space']) player.orbReady = true;
+            if(percent >= 100) { gameState = 'win'; document.getElementById('win-screen').classList.remove('hidden'); document.getElementById('game-hud').style.display = 'none'; }
+        }
+        requestAnimationFrame(update);
+    }
+
+    function drawGrid(sx, sy) {
+        ctx.strokeStyle = "#111";
+        for(let x = -(sx%40); x < canvas.width; x+=40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+        for(let y = -(sy%40); y < canvas.height; y+=40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+        ctx.strokeStyle = "#00ffea"; ctx.lineWidth = 3;
+        const gy = (canvas.height - 100) - sy;
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(canvas.width, gy); ctx.stroke();
+    }
+
+    function drawPlayer(x, y, mode) {
+        const icon = customIcons[selectedIcon];
+        ctx.save(); ctx.translate(x+20, y+20);
+        if(mode === 'ship') {
+            ctx.fillStyle = "#444"; ctx.beginPath(); ctx.moveTo(-25, 10); ctx.lineTo(25, 10); ctx.lineTo(0, 30); ctx.fill(); ctx.translate(0, -10);
+        }
+        ctx.fillStyle = "#00ffea";
+        icon.forEach((v, i) => { if(v) ctx.fillRect((i%8)*5-20, Math.floor(i/8)*5-20, 5, 5); });
+        ctx.strokeStyle = "white"; ctx.strokeRect(-20, -20, 40, 40);
+        ctx.restore();
+    }
+
+    function drawObjects(objs, sx, sy) {
+        objs.forEach(o => {
+            const x = o.x - sx, y = o.y - sy;
+            if(x < -50 || x > canvas.width + 50) return;
+            ctx.save(); ctx.translate(x+20, y+20); ctx.rotate((o.rot||0)*Math.PI/180);
+            if(o.type === 'block') { ctx.fillStyle = "#222"; ctx.fillRect(-20, -20, 40, 40); ctx.strokeStyle = "#555"; ctx.strokeRect(-20, -20, 40, 40); }
+            else if(o.type === 'spike') { ctx.fillStyle = "#ff4444"; ctx.beginPath(); ctx.moveTo(-20, 20); ctx.lineTo(0, -20); ctx.lineTo(20, 20); ctx.fill(); }
+            else if(o.type === 'portal_ship') { ctx.strokeStyle = "#ffeb3b"; ctx.lineWidth = 4; ctx.strokeRect(-10, -40, 20, 80); }
+            else if(o.type === 'portal_cube') { ctx.strokeStyle = "#4CAF50"; ctx.lineWidth = 4; ctx.strokeRect(-10, -40, 20, 80); }
+            else if(o.type === 'orb') { ctx.fillStyle = "rgba(255, 235, 59, 0.4)"; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = "#ffeb3b"; ctx.stroke(); }
+            ctx.restore();
+        });
+    }
+
+    function rateLevel(i) { currentLvlIdx = i; document.getElementById('rate-window').classList.remove('hidden'); }
+    function startEditor() {
+        gameState = 'editor'; editorObjects = []; camX = 0; camY = 0;
+        hideAllWindows(); document.getElementById('editor-tools').classList.remove('hidden');
+    }
+    function setBrush(b) { brush = b; document.getElementById('brush-info').innerText = b.toUpperCase() + " ("+brushRot+"°)"; }
+    function rotateBrush() { brushRot = (brushRot + 90) % 360; setBrush(brush); }
+    function quitToMenu() {
+        gameState = 'menu'; document.getElementById('game-hud').style.display = 'none';
+        document.getElementById('win-screen').classList.add('hidden'); backToMenu();
+    }
+    function hideAllWindows() { document.querySelectorAll('.window, #editor-tools').forEach(el => el.classList.add('hidden')); }
+    function backToMenu() { hideAllWindows(); gameState = 'menu'; document.getElementById('main-menu').classList.remove('hidden'); }
+
+    canvas.onmousedown = (e) => {
+        if(gameState !== 'editor') return;
+        const gx = Math.floor((e.clientX + camX)/40)*40;
+        const gy = Math.floor((e.clientY + camY)/40)*40;
+        if(e.button === 0) editorObjects.push({x: gx, y: gy, type: brush, rot: brushRot});
+        else editorObjects = editorObjects.filter(o => o.x !== gx || o.y !== gy);
+    };
+    window.oncontextmenu = (e) => e.preventDefault();
+
+    function openIconEditor() {
+        hideAllWindows(); const win = document.createElement('div'); win.className = "window"; win.innerHTML = "<h3>РИСОВАЛКА</h3><div id='p-grid' style='display:grid; grid-template-columns:repeat(8,30px); gap:2px; margin:15px auto; width:256px;'></div>";
+        const grid = win.querySelector('#p-grid');
+        for(let i=0; i<64; i++) { const p = document.createElement('div'); p.style.width="30px"; p.style.height="30px"; p.style.background="#111"; p.style.border="1px solid #333"; p.onclick=()=>p.style.background=p.style.background==='rgb(0, 255, 234)'?'#111':'#00ffea'; grid.appendChild(p); }
+        const b = document.createElement('button'); b.className='btn-green'; b.innerText="СОХРАНИТЬ";
+        b.onclick=()=>{ customIcons.push(Array.from(grid.children).map(p=>p.style.background==='rgb(0, 255, 234)'?1:0)); localStorage.setItem('gd_v10_icons', JSON.stringify(customIcons)); win.remove(); backToMenu(); };
+        win.appendChild(b); document.getElementById('ui-overlay').appendChild(win);
+    }
+
+    function openIconSelector() {
+        hideAllWindows(); const win = document.createElement('div'); win.className = "window"; win.innerHTML = "<h3>ВЫБОР ИКОНКИ</h3><div id='s-grid' style='display:flex; flex-wrap:wrap; gap:10px;'></div>";
+        customIcons.forEach((icon, idx) => {
+            const c = document.createElement('canvas'); c.width=40; c.height=40; c.style.border="2px solid #555";
+            const ctx2 = c.getContext('2d'); icon.forEach((v, pi) => { if(v) { ctx2.fillStyle="#00ffea"; ctx2.fillRect((pi%8)*5, Math.floor(pi/8)*5, 5, 5); } });
+            c.onclick = () => { selectedIcon = idx; win.remove(); backToMenu(); };
+            win.querySelector('#s-grid').appendChild(c);
+        });
+        document.getElementById('ui-overlay').appendChild(win);
+    }
+
+    update();
+</script>
+</body>
+</html>
